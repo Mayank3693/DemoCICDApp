@@ -1,0 +1,78 @@
+name: iOS CI CD Demo
+
+on:
+  push:
+    branches: [main]
+
+  pull_request:
+    branches: [main]
+
+  workflow_dispatch:
+
+jobs:
+  ci:
+    name: CI - Build and Test
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Check Xcode Version
+        run: xcodebuild -version
+
+      - name: Run Unit Tests
+        run: |
+          xcodebuild test \
+            -project DemoCICDApp.xcodeproj \
+            -scheme DemoCICDApp \
+            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -resultBundlePath TestResults.xcresult \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Upload Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Unit-Test-Results
+          path: TestResults.xcresult
+          if-no-files-found: ignore
+
+  cd:
+    name: CD - Deliver Simulator Build
+    needs: ci
+
+    if: >
+      github.event_name != 'pull_request' &&
+      github.ref == 'refs/heads/main'
+
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Build Release App
+        run: |
+          xcodebuild build \
+            -project DemoCICDApp.xcodeproj \
+            -scheme DemoCICDApp \
+            -configuration Release \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Package Simulator App
+        run: |
+          cd build/Build/Products/Release-iphonesimulator
+          ditto -c -k --keepParent \
+            DemoCICDApp.app \
+            "$GITHUB_WORKSPACE/DemoCICDApp-Simulator.zip"
+
+      - name: Upload App
+        uses: actions/upload-artifact@v4
+        with:
+          name: DemoCICDApp-Release
+          path: DemoCICDApp-Simulator.zip
+          if-no-files-found: error
