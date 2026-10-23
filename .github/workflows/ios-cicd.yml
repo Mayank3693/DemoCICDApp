@@ -1,12 +1,11 @@
+
 name: iOS CI CD Demo
 
 on:
   push:
     branches: [main]
-
   pull_request:
     branches: [main]
-
   workflow_dispatch:
 
 jobs:
@@ -21,12 +20,63 @@ jobs:
       - name: Check Xcode Version
         run: xcodebuild -version
 
+      - name: Set Up iOS Simulator
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Checking installed iOS runtimes..."
+
+          if ! xcrun simctl list runtimes available | grep -q 'iOS'; then
+            echo "Downloading iOS Simulator runtime..."
+            xcodebuild -downloadPlatform iOS
+          fi
+
+          echo "Available iOS runtimes:"
+          xcrun simctl list runtimes available
+
+          echo "Finding an available iPhone Simulator..."
+
+          DEVICE_ID=$(xcrun simctl list devices available \
+            | grep -E 'iPhone.*\([0-9A-Fa-f-]{36}\)' \
+            | head -n 1 \
+            | sed -E 's/.*\(([0-9A-Fa-f-]{36})\).*/\1/' || true)
+
+          if [ -z "$DEVICE_ID" ]; then
+            echo "Creating an iPhone Simulator..."
+
+            DEVICE_TYPE=$(xcrun simctl list devicetypes \
+              | grep 'iPhone 16 (' \
+              | head -n 1 \
+              | sed -E 's/.*\((com\.apple\.CoreSimulator\.SimDeviceType\.[^)]+)\).*/\1/' || true)
+
+            if [ -z "$DEVICE_TYPE" ]; then
+              echo "iPhone 16 device type unavailable."
+              exit 1
+            fi
+
+            RUNTIME=$(xcrun simctl list runtimes available \
+              | grep 'iOS' \
+              | tail -n 1 \
+              | sed -E 's/.*(com\.apple\.CoreSimulator\.SimRuntime\.iOS-[0-9-]+).*/\1/')
+
+            DEVICE_ID=$(xcrun simctl create \
+              "CI iPhone 16" \
+              "$DEVICE_TYPE" \
+              "$RUNTIME")
+          fi
+
+          echo "Using Simulator: $DEVICE_ID"
+          echo "SIMULATOR_ID=$DEVICE_ID" >> "$GITHUB_ENV"
+
       - name: Run Unit Tests
         run: |
           xcodebuild test \
             -project DemoCICDApp.xcodeproj \
             -scheme DemoCICDApp \
-            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -only-testing:DemoCICDAppTests \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
+            -parallel-testing-enabled NO \
             -resultBundlePath TestResults.xcresult \
             CODE_SIGNING_ALLOWED=NO
 
@@ -66,6 +116,7 @@ jobs:
       - name: Package Simulator App
         run: |
           cd build/Build/Products/Release-iphonesimulator
+
           ditto -c -k --keepParent \
             DemoCICDApp.app \
             "$GITHUB_WORKSPACE/DemoCICDApp-Simulator.zip"
