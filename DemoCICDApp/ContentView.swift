@@ -16,7 +16,7 @@ struct ContentView: View {
     
     var body: some View {
         VStack(spacing: 20) {
-            Text("CI/CD Demo")
+            Text("CI/CD Demo - Version 2")
                 .font(.largeTitle)
             TextField("Email", text: $email)
                 .textFieldStyle(.roundedBorder)
